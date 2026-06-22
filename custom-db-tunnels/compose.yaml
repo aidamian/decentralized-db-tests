@@ -1,5 +1,11 @@
 name: custom_db_tunnels
 
+# Custom DB Cloudflare tunnel lab.
+#
+# The gateway gets node URLs from `.env` and reaches nodes through Cloudflare.
+# Each `cloudflared-nodeN` sidecar shares only its node's network namespace, so
+# the node origin is local to that tunnel connector and not reachable from other
+# DB-node containers through Docker networking.
 x-cloudflared: &cloudflared
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
@@ -14,6 +20,7 @@ x-cloudflared: &cloudflared
 
 services:
   gateway:
+    # Client-facing API origin for CLOUDFLARE_TOKEN_EXTERNAL.
     build:
       context: .
       dockerfile: gateway/Dockerfile
@@ -40,6 +47,7 @@ services:
         target: cf_token
 
   custom-node1:
+    # DB node: private Docker network only.
     build:
       context: .
       dockerfile: custom/node/Dockerfile
@@ -55,6 +63,7 @@ services:
       - node1_net
 
   cloudflared-node1:
+    # Last-resort direct node tunnel for node1. It is not node-to-node Docker TCP.
     <<: *cloudflared
     profiles: ["edge", "node-direct"]
     network_mode: "service:custom-node1"

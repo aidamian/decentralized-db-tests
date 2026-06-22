@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the brokered rqlite base lab. Native rqlite join flags
+# are forbidden here because this lab uses NATS relays, not Raft peer TCP.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

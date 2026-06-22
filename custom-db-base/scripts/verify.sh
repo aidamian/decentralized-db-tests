@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the brokered custom base lab. These checks do not prove
+# runtime replication; they prove the compose file keeps DB nodes isolated and
+# keeps client ingress behind the external Cloudflare tunnel.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

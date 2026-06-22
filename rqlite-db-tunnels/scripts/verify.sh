@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the native rqlite tunnel experiment. The expected peer
+# transport is Cloudflare TCP proxying, so `cloudflared access tcp` must appear.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the custom tunnel lab. Direct node access is represented
+# only by Cloudflare sidecars, never by shared Docker networks or host ports.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

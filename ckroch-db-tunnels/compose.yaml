@@ -1,5 +1,10 @@
 name: ckroch_db_tunnels
 
+# Native CockroachDB-over-Cloudflare TCP experiment.
+#
+# This is the last-resort variant. CockroachDB inter-node RPC remains TCP, but
+# peer names resolve to local `cloudflared access tcp` sidecars instead of a
+# shared Docker network between DB containers.
 x-cloudflared-run: &cloudflared-run
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
@@ -35,6 +40,7 @@ x-cockroach: &cockroach
 
 services:
   gateway:
+    # Client ingress origin for the external Cloudflare tunnel.
     build:
       context: .
       dockerfile: gateway/Dockerfile
@@ -60,6 +66,7 @@ services:
         target: cf_token
 
   ckroch1:
+    # DB node: private network only. Peer aliases point at local TCP proxies.
     <<: *cockroach
     hostname: ckroch1
     command:
@@ -91,6 +98,7 @@ services:
         target: cf_token
 
   node1-to-node2:
+    # Local proxy inside node1_net that dials node2 through Cloudflare Access.
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
     command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:26357

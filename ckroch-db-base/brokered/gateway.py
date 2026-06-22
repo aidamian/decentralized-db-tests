@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""HTTP ingress for the brokered base labs.
+
+The gateway is the only component that accepts client requests in the base
+projects. It does not talk to DB nodes directly. Writes are converted into a
+single command on the NATS JetStream log, and relays attached to each isolated
+node network apply that command locally. The gateway returns after enough relay
+acknowledgements arrive, which models a 2-of-3 quorum without giving DB nodes a
+direct network path to each other.
+"""
+
 import argparse
 import asyncio
 import json
@@ -21,6 +31,8 @@ QUERY_TIMEOUT_SECONDS = float(os.environ.get("QUERY_TIMEOUT_SECONDS", "3"))
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
+    """Small HTTP API used by the local test client and Cloudflare origin."""
+
     def do_GET(self) -> None:
         if self.path == "/health":
             self._json(HTTPStatus.OK, {"ok": True, "role": "gateway"})
@@ -42,6 +54,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if "value" not in payload:
             self._json(HTTPStatus.BAD_REQUEST, {"error": "value is required"})
             return
+        # The command ID is the idempotency key used by relays. A replayed
+        # command can be seen more than once by a durable consumer, so relays
+        # must be able to apply it safely.
         command = {
             "command_id": uuid.uuid4().hex,
             "operation": "put",
@@ -83,8 +98,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
 
 async def publish_and_wait(command: dict[str, Any], min_acks: int) -> dict[str, Any]:
+    """Publish one write command and wait for relay acknowledgements."""
+
     nc = await nats.connect(NATS_URL, connect_timeout=2)
     try:
+        # Acks are ordinary NATS messages, not DB-to-DB communication. The
+        # wildcard lets any node relay report that it applied the command.
         ack_subject = f"db.event.applied.{command['command_id']}.*"
         sub = await nc.subscribe(ack_subject)
         await nc.flush()
@@ -109,6 +128,8 @@ async def publish_and_wait(command: dict[str, Any], min_acks: int) -> dict[str, 
 
 
 async def ensure_stream(js: Any) -> None:
+    """Create the command stream if this is the first component to start."""
+
     try:
         await js.add_stream(name="DB_COMMANDS", subjects=["db.cmd.>"])
     except Exception:
@@ -116,8 +137,12 @@ async def ensure_stream(js: Any) -> None:
 
 
 async def query_key(key: str) -> dict[str, Any]:
+    """Ask all live relays for a key without connecting to any DB node."""
+
     nc = await nats.connect(NATS_URL, connect_timeout=2)
     try:
+        # The reply inbox is sent inside the payload so every subscribed relay
+        # can answer independently. This is a fan-out read through the bus.
         inbox = nc.new_inbox()
         sub = await nc.subscribe(inbox)
         await nc.publish("db.query", json.dumps({"key": key, "reply": inbox}).encode("utf-8"))

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Tiny client used by the base-project e2e scenarios.
+
+The client talks only to the gateway. It never receives node addresses and
+therefore cannot accidentally create the direct node-to-node topology the lab is
+designed to avoid.
+"""
+
 import argparse
 import json
 import os
@@ -14,6 +21,8 @@ API_TIMEOUT_SECONDS = float(os.environ.get("API_TIMEOUT_SECONDS", "30"))
 
 
 def request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Send one JSON request to the gateway."""
+
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Accept": "application/json"}
     if payload is not None:
@@ -54,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(request("GET", path), sort_keys=True))
         return 0
     if args.command == "e2e":
+        # The scenario exercises the full brokered path: gateway -> NATS ->
+        # relays -> isolated DB nodes -> query replies through NATS.
         key = "alpha"
         result = {
             "health": request("GET", "/health"),

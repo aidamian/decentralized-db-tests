@@ -1,5 +1,11 @@
 name: custom_db_base
 
+# Brokered custom database lab.
+#
+# The DB containers (`custom-node1..3`) never share a network. Each node has a
+# relay sidecar on its private node network plus the shared NATS bus network.
+# The gateway publishes commands to NATS and waits for relay acknowledgements;
+# it never opens a direct TCP connection to a DB node.
 x-cloudflared-external: &cloudflared-external
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
@@ -18,6 +24,7 @@ x-cloudflared-external: &cloudflared-external
 
 services:
   event-bus:
+    # Durable operation log used instead of DB-node peer networking.
     image: nats:2-alpine
     command: ["-js", "-sd", "/data"]
     expose:
@@ -28,6 +35,7 @@ services:
       - bus_net
 
   gateway:
+    # Client ingress origin. Cloudflare external tunnel points here.
     build:
       context: .
       dockerfile: brokered/Dockerfile
@@ -45,6 +53,8 @@ services:
       - ingress_net
 
   cloudflared-external:
+    # Disabled unless `--profile edge` is selected. It shares the gateway
+    # network namespace so Cloudflare reaches the gateway on localhost.
     <<: *cloudflared-external
     profiles: ["edge"]
     network_mode: "service:gateway"
@@ -52,6 +62,7 @@ services:
       - gateway
 
   custom-node1:
+    # DB node: private network only, no bus and no host ports.
     build:
       context: .
       dockerfile: custom/node/Dockerfile
@@ -97,6 +108,7 @@ services:
       - node3_net
 
   relay1:
+    # Relay: bridge between NATS and only custom-node1's local HTTP API.
     build:
       context: .
       dockerfile: brokered/Dockerfile

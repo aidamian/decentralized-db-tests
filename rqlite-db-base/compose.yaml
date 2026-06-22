@@ -1,5 +1,11 @@
 name: rqlite_db_base
 
+# Brokered rqlite logical-replica lab.
+#
+# These rqlite containers are intentionally single-node stores. There is no
+# rqlite Raft join here because native Raft requires direct peer TCP. Relays
+# consume one NATS command stream and apply the same SQL to each isolated local
+# rqlite HTTP API.
 x-cloudflared-external: &cloudflared-external
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
@@ -25,6 +31,7 @@ x-rqlite: &rqlite
 
 services:
   event-bus:
+    # Durable operation log replacing native rqlite peer replication.
     image: nats:2-alpine
     command: ["-js", "-sd", "/data"]
     expose:
@@ -35,6 +42,7 @@ services:
       - bus_net
 
   gateway:
+    # Client ingress origin. It publishes writes to NATS, not to rqlite nodes.
     build:
       context: .
       dockerfile: brokered/Dockerfile
@@ -59,6 +67,7 @@ services:
       - gateway
 
   rqlite1:
+    # Isolated single-node rqlite store. It is not attached to bus_net.
     <<: *rqlite
     hostname: rqlite1
     command:
@@ -122,6 +131,7 @@ services:
       - node3_net
 
   relay1:
+    # Relay attached to bus_net and node1_net only.
     build:
       context: .
       dockerfile: brokered/Dockerfile

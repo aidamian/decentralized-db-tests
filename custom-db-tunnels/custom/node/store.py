@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""SQLite-backed custom event store.
+
+The store is deliberately small so the lab can show the replication mechanics
+without relying on a native database cluster. Every write becomes an immutable
+event with a vector clock. When relays replay the same event into different
+nodes, the state converges locally because inserts are idempotent and conflicts
+are reduced deterministically.
+"""
+
 import hashlib
 import json
 import sqlite3
@@ -36,6 +45,8 @@ def compare_vectors(left: dict[str, int], right: dict[str, int]) -> str:
 
 
 class EventStore:
+    """Local event log and materialized key/value state for one node."""
+
     def __init__(self, node_id: str, db_path: str | Path):
         self.node_id = node_id
         self.db_path = Path(db_path)
@@ -43,6 +54,8 @@ class EventStore:
         self._init_db()
 
     def local_put(self, key: str, value: Any, actor: str) -> dict[str, Any]:
+        """Create a local event and immediately apply it to local state."""
+
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             seq = self._next_local_seq(conn)
@@ -65,6 +78,8 @@ class EventStore:
             return event
 
     def import_events(self, events: list[dict[str, Any]]) -> dict[str, int]:
+        """Import replicated events; duplicates are counted but not re-applied."""
+
         inserted = 0
         ignored = 0
         with self._connect() as conn:
@@ -194,6 +209,8 @@ class EventStore:
         return cursor.rowcount == 1
 
     def _apply_to_state(self, conn: sqlite3.Connection, event: dict[str, Any]) -> None:
+        """Merge one event into the materialized state using vector clocks."""
+
         current = self._get_state_row(conn, event["key"])
         incoming = self._leaf_from_event(event)
         leaves = self._state_leaves(current)
@@ -217,6 +234,9 @@ class EventStore:
             if not dominated:
                 reduced.append(leaf)
 
+        # Concurrent leaves are ordered by event ID so every node chooses the
+        # same visible winner while still preserving the other leaves as
+        # conflict metadata.
         reduced.sort(key=lambda item: item["event_id"])
         winner = reduced[-1]
         conflicts = [leaf for leaf in reduced if leaf["event_id"] != winner["event_id"]]

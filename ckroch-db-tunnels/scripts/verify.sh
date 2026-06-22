@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the native Cockroach tunnel experiment. The expected
+# inter-node RPC path is Cloudflare TCP proxying, not Docker peer networking.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+# Static guardrails for the brokered Cockroach base lab. Cockroach nodes run as
+# isolated single-node stores, and NATS relays provide logical replication.
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 compose="$project_dir/compose.yaml"
 

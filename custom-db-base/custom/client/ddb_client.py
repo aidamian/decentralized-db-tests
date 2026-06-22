@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""Client helpers for the custom DB node HTTP API.
+
+The base projects now prefer the brokered gateway, but this client remains
+useful for the tunnel variant. It treats Cloudflare node URLs as ordinary HTTP
+node endpoints and performs quorum-style writes by reusing one event across the
+reachable nodes.
+"""
+
 import json
 import os
 import tempfile
@@ -130,6 +138,8 @@ class HttpNode:
 
 
 class SyncClient:
+    """Coordinate custom-node reads/writes over a list of HTTP endpoints."""
+
     def __init__(self, nodes: list[Node]):
         self.nodes = nodes
 
@@ -156,6 +166,8 @@ class SyncClient:
         }
 
     def put(self, key: str, value: Any, min_acks: int = 1, actor: str = "client") -> dict[str, Any]:
+        """Write once, then import the same event into the remaining nodes."""
+
         acks = []
         errors = []
         event = None
@@ -204,6 +216,8 @@ class SyncClient:
         return max(responses, key=lambda item: item["state"]["event_id"])
 
     def sync_all(self) -> dict[str, Any]:
+        """Exchange all known events among reachable nodes."""
+
         reachable: list[Node] = []
         events_by_id: dict[str, dict[str, Any]] = {}
         errors = []

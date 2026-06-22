@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""HTTP gateway for the native rqlite tunnel experiment.
+
+The gateway gives the external Cloudflare tunnel one stable HTTP origin. It
+proxies client requests to the local rqlite HTTP API on node 1. Raft peer
+traffic is not handled here; that traffic is configured in compose through
+`cloudflared access tcp` sidecars attached to each node network.
+"""
+
 import json
 import os
 import urllib.error
@@ -13,6 +21,8 @@ RQLITE_HTTP_URL = os.environ.get("RQLITE_HTTP_URL", "http://rqlite1:4001").rstri
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
+    """Forward rqlite HTTP API calls from the client ingress to node 1."""
+
     def do_GET(self) -> None:
         if self.path == "/health":
             self._json(HTTPStatus.OK, {"ok": True, "role": "rqlite-tunnel-gateway"})
@@ -27,6 +37,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             super().log_message(format, *args)
 
     def _proxy(self) -> None:
+        """Proxy the current HTTP request to the configured local rqlite API."""
+
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else None
         headers = {"Accept": self.headers.get("Accept", "application/json")}

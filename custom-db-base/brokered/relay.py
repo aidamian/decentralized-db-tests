@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""Relay between the NATS operation log and one local DB node.
+
+Each relay is attached to exactly two networks: the shared bus network and one
+node-local network. That placement is the key invariant: a relay may consume
+commands from NATS and apply them to its local database, but the DB container
+itself never joins the bus network and never sees another DB node.
+"""
+
 import asyncio
 import hashlib
 import json
@@ -41,6 +49,8 @@ def http_json(method: str, url: str, payload: Any | None = None) -> dict[str, An
 
 
 def custom_event(command: dict[str, Any]) -> dict[str, Any]:
+    """Translate a gateway command into the custom event-store format."""
+
     event = {
         "schema": 1,
         "origin_node": "gateway",
@@ -56,6 +66,8 @@ def custom_event(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_custom(command: dict[str, Any]) -> None:
+    """Apply a command to the local custom node through its local HTTP API."""
+
     http_json("POST", f"{LOCAL_HTTP_URL}/events", {"events": [custom_event(command)]})
 
 
@@ -78,6 +90,8 @@ def rqlite_query(sql: str) -> dict[str, Any]:
 
 
 def apply_rqlite(command: dict[str, Any]) -> None:
+    """Apply an idempotent key/value write to the local rqlite instance."""
+
     key = sql_quote(command["key"])
     value_json = sql_quote(canonical_json(command["value"]))
     command_id = sql_quote(command["command_id"])
@@ -102,6 +116,8 @@ def query_rqlite(key: str) -> Any:
 
 
 def apply_cockroach(command: dict[str, Any]) -> None:
+    """Apply an idempotent key/value write to the local CockroachDB store."""
+
     with psycopg.connect(LOCAL_DB_DSN, autocommit=True) as conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS _applied_events (command_id STRING PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
@@ -149,6 +165,8 @@ def query_key(key: str) -> Any:
 
 
 async def wait_for_nats() -> nats.NATS:
+    """Keep startup order simple by waiting until NATS is reachable."""
+
     while True:
         try:
             return await nats.connect(NATS_URL, connect_timeout=2)
@@ -165,6 +183,8 @@ async def ensure_stream(js: Any) -> None:
 
 
 async def handle_query(msg: Any) -> None:
+    """Answer a read request by querying only this relay's local DB."""
+
     if nc is None:
         raise RuntimeError("NATS connection is not initialized")
     payload = json.loads(msg.data.decode("utf-8"))
@@ -183,6 +203,8 @@ async def main() -> None:
     async for msg in sub.messages:
         command = json.loads(msg.data.decode("utf-8"))
         try:
+            # Manual ack happens only after the local DB write succeeds. If the
+            # relay is stopped mid-apply, JetStream redelivers the command.
             apply_command(command)
             await nc.publish(
                 f"db.event.applied.{command['command_id']}.{NODE_ID}",

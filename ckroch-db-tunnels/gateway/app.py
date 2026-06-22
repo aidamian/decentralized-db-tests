@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""HTTP key/value gateway for the CockroachDB tunnel experiment.
+
+The external Cloudflare tunnel points at this small HTTP API. It talks only to
+the local SQL endpoint on Cockroach node 1. Cockroach inter-node RPC is separate
+and is modeled in compose with Cloudflare TCP sidecars.
+"""
+
 import json
 import os
 import urllib.parse
@@ -14,6 +21,8 @@ LOCAL_DB_DSN = os.environ.get("LOCAL_DB_DSN", "postgresql://root@ckroch1:26257/d
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
+    """Expose a simple JSON key/value API over Cockroach SQL."""
+
     def do_GET(self) -> None:
         if self.path == "/health":
             self._json(HTTPStatus.OK, {"ok": True, "role": "ckroch-tunnel-gateway"})
@@ -45,6 +54,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             super().log_message(format, *args)
 
     def _ensure_schema(self, conn: psycopg.Connection[Any]) -> None:
+        """Create the test table lazily so the gateway can start before SQL is ready."""
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS kv (key STRING PRIMARY KEY, value_json STRING NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
@@ -58,6 +69,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
         return json.loads(row[0])
 
     def _put_key(self, key: str, value: Any) -> None:
+        """UPSERT one JSON value through the local Cockroach SQL endpoint."""
+
         with psycopg.connect(LOCAL_DB_DSN, autocommit=True) as conn:
             self._ensure_schema(conn)
             conn.execute(

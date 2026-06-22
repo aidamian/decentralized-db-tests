@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""HTTP wrapper around one custom EventStore.
+
+This server is intentionally node-local. In the base project only a relay can
+reach it; in the tunnel project Cloudflare exposes it as a remote origin. The
+server itself contains no peer discovery, no direct node dial-out, and no
+cluster membership logic.
+"""
+
 import json
 import os
 import urllib.parse
@@ -12,6 +20,8 @@ from custom.node.store import EventStore
 
 
 class NodeHandler(BaseHTTPRequestHandler):
+    """Expose local health, key/value, and event import endpoints."""
+
     store: EventStore
 
     def do_GET(self) -> None:
@@ -53,6 +63,8 @@ class NodeHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"error": "events must be a list"})
             return
         try:
+            # Relays use this endpoint to replay the gateway command log into a
+            # node-local event store. The store handles idempotency.
             result = self.store.import_events(events)
         except ValueError as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

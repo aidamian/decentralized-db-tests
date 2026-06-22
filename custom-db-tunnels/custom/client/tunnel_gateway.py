@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""Gateway for the custom Cloudflare-tunnel lab.
+
+This gateway is the only client-facing origin. It does not share a Docker
+network with any DB node. Instead, it receives the public node URLs from `.env`
+and talks to those URLs through Cloudflare, matching the last-resort tunnel
+architecture requested for direct node access.
+"""
+
 import json
 import os
 import urllib.parse
@@ -11,6 +19,8 @@ from custom.client.ddb_client import QuorumUnavailable, SyncClient
 
 
 class TunnelGatewayHandler(BaseHTTPRequestHandler):
+    """Expose a small key/value API backed by Cloudflare-published nodes."""
+
     client: SyncClient
 
     def do_GET(self) -> None:
@@ -36,6 +46,9 @@ class TunnelGatewayHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"error": "value is required"})
             return
         try:
+            # The gateway asks for two successful node writes, which matches the
+            # corrected 3-node quorum requirement while still tolerating one
+            # unavailable node.
             result = self.client.put(key, payload["value"], min_acks=int(os.environ.get("MIN_APPLY_ACKS", "2")))
         except QuorumUnavailable as exc:
             self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})

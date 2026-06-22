@@ -1,5 +1,10 @@
 name: ckroch_db_base
 
+# Brokered CockroachDB logical-replica lab.
+#
+# CockroachDB native clustering needs direct peer TCP and is therefore not used
+# in this base project. Each Cockroach container runs `start-single-node`; relays
+# apply the shared NATS command stream to their local SQL endpoint.
 x-cloudflared-external: &cloudflared-external
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
@@ -24,6 +29,7 @@ x-cockroach: &cockroach
 
 services:
   event-bus:
+    # Durable operation log replacing native Cockroach inter-node RPC.
     image: nats:2-alpine
     command: ["-js", "-sd", "/data"]
     expose:
@@ -34,6 +40,7 @@ services:
       - bus_net
 
   gateway:
+    # Client ingress origin. It talks to NATS only.
     build:
       context: .
       dockerfile: brokered/Dockerfile
@@ -58,6 +65,7 @@ services:
       - gateway
 
   ckroch1:
+    # Isolated single-node Cockroach store. No direct peer routes.
     <<: *cockroach
     hostname: ckroch1
     command:
@@ -97,6 +105,7 @@ services:
       - node3_net
 
   relay1:
+    # Relay attached to bus_net and node1_net only.
     build:
       context: .
       dockerfile: brokered/Dockerfile

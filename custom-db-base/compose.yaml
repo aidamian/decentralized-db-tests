@@ -1,0 +1,178 @@
+name: custom_db_base
+
+x-cloudflared-external: &cloudflared-external
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  command:
+    - tunnel
+    - --no-autoupdate
+    - --loglevel
+    - info
+    - run
+    - --token-file
+    - /run/secrets/cf_token_external
+  secrets:
+    - cf_token_external
+  environment:
+    PUBLIC_URL: ${CLOUDFLARE_URL_EXTERNAL}
+
+services:
+  event-bus:
+    image: nats:2-alpine
+    command: ["-js", "-sd", "/data"]
+    expose:
+      - "4222"
+    volumes:
+      - nats_data:/data
+    networks:
+      - bus_net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.gateway"]
+    environment:
+      NATS_URL: nats://event-bus:4222
+      MIN_APPLY_ACKS: "2"
+      PORT: "8080"
+    expose:
+      - "8080"
+    depends_on:
+      - event-bus
+    networks:
+      - bus_net
+      - ingress_net
+
+  cloudflared-external:
+    <<: *cloudflared-external
+    profiles: ["edge"]
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+
+  custom-node1:
+    build:
+      context: .
+      dockerfile: custom/node/Dockerfile
+    environment:
+      NODE_ID: node1
+      DB_PATH: /data/node.db
+      PORT: "8080"
+    expose:
+      - "8080"
+    volumes:
+      - node1_data:/data
+    networks:
+      - node1_net
+
+  custom-node2:
+    build:
+      context: .
+      dockerfile: custom/node/Dockerfile
+    environment:
+      NODE_ID: node2
+      DB_PATH: /data/node.db
+      PORT: "8080"
+    expose:
+      - "8080"
+    volumes:
+      - node2_data:/data
+    networks:
+      - node2_net
+
+  custom-node3:
+    build:
+      context: .
+      dockerfile: custom/node/Dockerfile
+    environment:
+      NODE_ID: node3
+      DB_PATH: /data/node.db
+      PORT: "8080"
+    expose:
+      - "8080"
+    volumes:
+      - node3_data:/data
+    networks:
+      - node3_net
+
+  relay1:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: custom
+      NODE_ID: node1
+      NATS_URL: nats://event-bus:4222
+      LOCAL_HTTP_URL: http://custom-node1:8080
+    depends_on:
+      - event-bus
+      - custom-node1
+    networks:
+      - bus_net
+      - node1_net
+
+  relay2:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: custom
+      NODE_ID: node2
+      NATS_URL: nats://event-bus:4222
+      LOCAL_HTTP_URL: http://custom-node2:8080
+    depends_on:
+      - event-bus
+      - custom-node2
+    networks:
+      - bus_net
+      - node2_net
+
+  relay3:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: custom
+      NODE_ID: node3
+      NATS_URL: nats://event-bus:4222
+      LOCAL_HTTP_URL: http://custom-node3:8080
+    depends_on:
+      - event-bus
+      - custom-node3
+    networks:
+      - bus_net
+      - node3_net
+
+  client:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.client", "e2e"]
+    environment:
+      API_URL: http://gateway:8080
+    depends_on:
+      - gateway
+    networks:
+      - ingress_net
+
+networks:
+  ingress_net:
+  bus_net:
+  node1_net:
+  node2_net:
+  node3_net:
+
+volumes:
+  nats_data:
+  node1_data:
+  node2_data:
+  node3_data:
+
+secrets:
+  cf_token_external:
+    environment: CLOUDFLARE_TOKEN_EXTERNAL

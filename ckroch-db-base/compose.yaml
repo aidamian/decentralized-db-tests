@@ -1,0 +1,178 @@
+name: ckroch_db_base
+
+x-cloudflared-external: &cloudflared-external
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  command:
+    - tunnel
+    - --no-autoupdate
+    - --loglevel
+    - info
+    - run
+    - --token-file
+    - /run/secrets/cf_token_external
+  secrets:
+    - cf_token_external
+  environment:
+    PUBLIC_URL: ${CLOUDFLARE_URL_EXTERNAL}
+
+x-cockroach: &cockroach
+  image: cockroachdb/cockroach:latest
+  expose:
+    - "26257"
+    - "8080"
+
+services:
+  event-bus:
+    image: nats:2-alpine
+    command: ["-js", "-sd", "/data"]
+    expose:
+      - "4222"
+    volumes:
+      - nats_data:/data
+    networks:
+      - bus_net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.gateway"]
+    environment:
+      NATS_URL: nats://event-bus:4222
+      MIN_APPLY_ACKS: "2"
+      PORT: "8080"
+    expose:
+      - "8080"
+    depends_on:
+      - event-bus
+    networks:
+      - bus_net
+      - ingress_net
+
+  cloudflared-external:
+    <<: *cloudflared-external
+    profiles: ["edge"]
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+
+  ckroch1:
+    <<: *cockroach
+    hostname: ckroch1
+    command:
+      - start-single-node
+      - --insecure
+      - --http-addr=ckroch1:8080
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node1_data:/cockroach/cockroach-data
+    networks:
+      - node1_net
+
+  ckroch2:
+    <<: *cockroach
+    hostname: ckroch2
+    command:
+      - start-single-node
+      - --insecure
+      - --http-addr=ckroch2:8080
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node2_data:/cockroach/cockroach-data
+    networks:
+      - node2_net
+
+  ckroch3:
+    <<: *cockroach
+    hostname: ckroch3
+    command:
+      - start-single-node
+      - --insecure
+      - --http-addr=ckroch3:8080
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node3_data:/cockroach/cockroach-data
+    networks:
+      - node3_net
+
+  relay1:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: cockroach
+      NODE_ID: node1
+      NATS_URL: nats://event-bus:4222
+      LOCAL_DB_DSN: postgresql://root@ckroch1:26257/defaultdb?sslmode=disable
+    depends_on:
+      - event-bus
+      - ckroch1
+    networks:
+      - bus_net
+      - node1_net
+
+  relay2:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: cockroach
+      NODE_ID: node2
+      NATS_URL: nats://event-bus:4222
+      LOCAL_DB_DSN: postgresql://root@ckroch2:26257/defaultdb?sslmode=disable
+    depends_on:
+      - event-bus
+      - ckroch2
+    networks:
+      - bus_net
+      - node2_net
+
+  relay3:
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.relay"]
+    environment:
+      ENGINE: cockroach
+      NODE_ID: node3
+      NATS_URL: nats://event-bus:4222
+      LOCAL_DB_DSN: postgresql://root@ckroch3:26257/defaultdb?sslmode=disable
+    depends_on:
+      - event-bus
+      - ckroch3
+    networks:
+      - bus_net
+      - node3_net
+
+  client:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: brokered/Dockerfile
+    command: ["python", "-m", "brokered.client", "e2e"]
+    environment:
+      API_URL: http://gateway:8080
+    depends_on:
+      - gateway
+    networks:
+      - ingress_net
+
+networks:
+  ingress_net:
+  bus_net:
+  node1_net:
+  node2_net:
+  node3_net:
+
+volumes:
+  nats_data:
+  node1_data:
+  node2_data:
+  node3_data:
+
+secrets:
+  cf_token_external:
+    environment: CLOUDFLARE_TOKEN_EXTERNAL

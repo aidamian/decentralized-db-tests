@@ -1,0 +1,255 @@
+name: rqlite_db_tunnels
+
+x-cloudflared-run: &cloudflared-run
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  command:
+    - tunnel
+    - --no-autoupdate
+    - --loglevel
+    - info
+    - run
+    - --token-file
+    - /run/secrets/cf_token
+
+x-cloudflared-access: &cloudflared-access
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  entrypoint: ["/bin/sh", "-c"]
+
+x-rqlite: &rqlite
+  image: rqlite/rqlite:10.2.1
+  user: "0:0"
+  expose:
+    - "4001"
+    - "4002"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      RQLITE_HTTP_URL: http://rqlite1:4001
+      PORT: "8080"
+    expose:
+      - "8080"
+    networks:
+      - ingress_net
+      - node1_net
+
+  cloudflared-external:
+    <<: *cloudflared-run
+    profiles: ["edge"]
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_EXTERNAL}
+    secrets:
+      - source: cf_token_external
+        target: cf_token
+
+  rqlite1:
+    <<: *rqlite
+    hostname: rqlite1
+    command:
+      - rqlited
+      - -node-id
+      - rqlite1
+      - -http-addr
+      - 0.0.0.0:4001
+      - -http-adv-addr
+      - rqlite1:4001
+      - -raft-addr
+      - 0.0.0.0:4002
+      - -raft-adv-addr
+      - rqlite1-peer:4002
+      - -bootstrap-expect
+      - "3"
+      - -join
+      - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
+      - /rqlite/file/data
+    volumes:
+      - node1_data:/rqlite/file/data
+    networks:
+      node1_net:
+        aliases:
+          - rqlite1-peer
+
+  cloudflared-node1:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:rqlite1"
+    depends_on:
+      - rqlite1
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_1}
+    secrets:
+      - source: cf_token_1
+        target: cf_token
+
+  node1-to-node2:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+    networks:
+      node1_net:
+        aliases:
+          - rqlite2-peer
+
+  node1-to-node3:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+    networks:
+      node1_net:
+        aliases:
+          - rqlite3-peer
+
+  rqlite2:
+    <<: *rqlite
+    hostname: rqlite2
+    command:
+      - rqlited
+      - -node-id
+      - rqlite2
+      - -http-addr
+      - 0.0.0.0:4001
+      - -http-adv-addr
+      - rqlite2:4001
+      - -raft-addr
+      - 0.0.0.0:4002
+      - -raft-adv-addr
+      - rqlite2-peer:4002
+      - -bootstrap-expect
+      - "3"
+      - -join
+      - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
+      - /rqlite/file/data
+    volumes:
+      - node2_data:/rqlite/file/data
+    networks:
+      node2_net:
+        aliases:
+          - rqlite2-peer
+
+  cloudflared-node2:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:rqlite2"
+    depends_on:
+      - rqlite2
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_2}
+    secrets:
+      - source: cf_token_2
+        target: cf_token
+
+  node2-to-node1:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+    networks:
+      node2_net:
+        aliases:
+          - rqlite1-peer
+
+  node2-to-node3:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+    networks:
+      node2_net:
+        aliases:
+          - rqlite3-peer
+
+  rqlite3:
+    <<: *rqlite
+    hostname: rqlite3
+    command:
+      - rqlited
+      - -node-id
+      - rqlite3
+      - -http-addr
+      - 0.0.0.0:4001
+      - -http-adv-addr
+      - rqlite3:4001
+      - -raft-addr
+      - 0.0.0.0:4002
+      - -raft-adv-addr
+      - rqlite3-peer:4002
+      - -bootstrap-expect
+      - "3"
+      - -join
+      - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
+      - /rqlite/file/data
+    volumes:
+      - node3_data:/rqlite/file/data
+    networks:
+      node3_net:
+        aliases:
+          - rqlite3-peer
+
+  cloudflared-node3:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:rqlite3"
+    depends_on:
+      - rqlite3
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_3}
+    secrets:
+      - source: cf_token_3
+        target: cf_token
+
+  node3-to-node1:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+    networks:
+      node3_net:
+        aliases:
+          - rqlite1-peer
+
+  node3-to-node2:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:4002
+    environment:
+      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+    networks:
+      node3_net:
+        aliases:
+          - rqlite2-peer
+
+networks:
+  ingress_net:
+  node1_net:
+  node2_net:
+  node3_net:
+
+volumes:
+  node1_data:
+  node2_data:
+  node3_data:
+
+secrets:
+  cf_token_external:
+    environment: CLOUDFLARE_TOKEN_EXTERNAL
+  cf_token_1:
+    environment: CLOUDFLARE_TOKEN_1
+  cf_token_2:
+    environment: CLOUDFLARE_TOKEN_2
+  cf_token_3:
+    environment: CLOUDFLARE_TOKEN_3

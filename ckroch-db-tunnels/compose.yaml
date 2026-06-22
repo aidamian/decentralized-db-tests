@@ -1,0 +1,254 @@
+name: ckroch_db_tunnels
+
+x-cloudflared-run: &cloudflared-run
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  command:
+    - tunnel
+    - --no-autoupdate
+    - --loglevel
+    - info
+    - run
+    - --token-file
+    - /run/secrets/cf_token
+
+x-cloudflared-access: &cloudflared-access
+  image: cloudflare/cloudflared:latest
+  restart: unless-stopped
+  entrypoint: ["/bin/sh", "-c"]
+
+x-cockroach: &cockroach
+  image: cockroachdb/cockroach:latest
+  command:
+    - start
+    - --insecure
+    - --listen-addr=ckroch1:26357
+    - --advertise-addr=ckroch1-peer:26357
+    - --sql-addr=ckroch1:26257
+    - --http-addr=ckroch1:8080
+    - --join=ckroch1-peer:26357,ckroch2-peer:26357,ckroch3-peer:26357
+    - --store=/cockroach/cockroach-data
+  expose:
+    - "26257"
+    - "26357"
+    - "8080"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      LOCAL_DB_DSN: postgresql://root@ckroch1:26257/defaultdb?sslmode=disable
+      PORT: "8080"
+    expose:
+      - "8080"
+    networks:
+      - ingress_net
+      - node1_net
+
+  cloudflared-external:
+    <<: *cloudflared-run
+    profiles: ["edge"]
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_EXTERNAL}
+    secrets:
+      - source: cf_token_external
+        target: cf_token
+
+  ckroch1:
+    <<: *cockroach
+    hostname: ckroch1
+    command:
+      - start
+      - --insecure
+      - --listen-addr=ckroch1:26357
+      - --advertise-addr=ckroch1-peer:26357
+      - --sql-addr=ckroch1:26257
+      - --http-addr=ckroch1:8080
+      - --join=ckroch1-peer:26357,ckroch2-peer:26357,ckroch3-peer:26357
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node1_data:/cockroach/cockroach-data
+    networks:
+      node1_net:
+        aliases:
+          - ckroch1-peer
+
+  cloudflared-node1:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:ckroch1"
+    depends_on:
+      - ckroch1
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_1}
+    secrets:
+      - source: cf_token_1
+        target: cf_token
+
+  node1-to-node2:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+    networks:
+      node1_net:
+        aliases:
+          - ckroch2-peer
+
+  node1-to-node3:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+    networks:
+      node1_net:
+        aliases:
+          - ckroch3-peer
+
+  ckroch2:
+    <<: *cockroach
+    hostname: ckroch2
+    command:
+      - start
+      - --insecure
+      - --listen-addr=ckroch2:26357
+      - --advertise-addr=ckroch2-peer:26357
+      - --sql-addr=ckroch2:26257
+      - --http-addr=ckroch2:8080
+      - --join=ckroch1-peer:26357,ckroch2-peer:26357,ckroch3-peer:26357
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node2_data:/cockroach/cockroach-data
+    networks:
+      node2_net:
+        aliases:
+          - ckroch2-peer
+
+  cloudflared-node2:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:ckroch2"
+    depends_on:
+      - ckroch2
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_2}
+    secrets:
+      - source: cf_token_2
+        target: cf_token
+
+  node2-to-node1:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+    networks:
+      node2_net:
+        aliases:
+          - ckroch1-peer
+
+  node2-to-node3:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+    networks:
+      node2_net:
+        aliases:
+          - ckroch3-peer
+
+  ckroch3:
+    <<: *cockroach
+    hostname: ckroch3
+    command:
+      - start
+      - --insecure
+      - --listen-addr=ckroch3:26357
+      - --advertise-addr=ckroch3-peer:26357
+      - --sql-addr=ckroch3:26257
+      - --http-addr=ckroch3:8080
+      - --join=ckroch1-peer:26357,ckroch2-peer:26357,ckroch3-peer:26357
+      - --store=/cockroach/cockroach-data
+    volumes:
+      - node3_data:/cockroach/cockroach-data
+    networks:
+      node3_net:
+        aliases:
+          - ckroch3-peer
+
+  cloudflared-node3:
+    <<: *cloudflared-run
+    profiles: ["edge", "node-direct"]
+    network_mode: "service:ckroch3"
+    depends_on:
+      - ckroch3
+    environment:
+      PUBLIC_URL: ${CLOUDFLARE_URL_3}
+    secrets:
+      - source: cf_token_3
+        target: cf_token
+
+  node3-to-node1:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+    networks:
+      node3_net:
+        aliases:
+          - ckroch1-peer
+
+  node3-to-node2:
+    <<: *cloudflared-access
+    profiles: ["edge", "node-direct"]
+    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:26357
+    environment:
+      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+    networks:
+      node3_net:
+        aliases:
+          - ckroch2-peer
+
+  cockroach-init:
+    image: cockroachdb/cockroach:latest
+    profiles: ["edge"]
+    command:
+      - sh
+      - -c
+      - sleep 20 && cockroach init --insecure --host=ckroch1:26257 || true
+    depends_on:
+      - ckroch1
+      - ckroch2
+      - ckroch3
+    networks:
+      - node1_net
+
+networks:
+  ingress_net:
+  node1_net:
+  node2_net:
+  node3_net:
+
+volumes:
+  node1_data:
+  node2_data:
+  node3_data:
+
+secrets:
+  cf_token_external:
+    environment: CLOUDFLARE_TOKEN_EXTERNAL
+  cf_token_1:
+    environment: CLOUDFLARE_TOKEN_1
+  cf_token_2:
+    environment: CLOUDFLARE_TOKEN_2
+  cf_token_3:
+    environment: CLOUDFLARE_TOKEN_3

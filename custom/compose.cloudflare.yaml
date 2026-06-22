@@ -1,0 +1,32 @@
+services:
+  custom-node1:
+    environment:
+      ENABLE_CLOUDFLARED: "1"
+      CLOUDFLARED_TOKEN_FILE: /run/secrets/cf_token_1
+      PUBLIC_URL: ${CLOUDFLARE_URL_1}
+    secrets:
+      - cf_token_1
+
+  custom-node2:
+    environment:
+      ENABLE_CLOUDFLARED: "1"
+      CLOUDFLARED_TOKEN_FILE: /run/secrets/cf_token_2
+      PUBLIC_URL: ${CLOUDFLARE_URL_2}
+    secrets:
+      - cf_token_2
+
+  custom-node3:
+    environment:
+      ENABLE_CLOUDFLARED: "1"
+      CLOUDFLARED_TOKEN_FILE: /run/secrets/cf_token_3
+      PUBLIC_URL: ${CLOUDFLARE_URL_3}
+    secrets:
+      - cf_token_3
+
+secrets:
+  cf_token_1:
+    environment: CLOUDFLARE_TOKEN_1
+  cf_token_2:
+    environment: CLOUDFLARE_TOKEN_2
+  cf_token_3:
+    environment: CLOUDFLARE_TOKEN_3

@@ -14,7 +14,7 @@ Run a local brokered e2e without publishing host ports:
 ```bash
 docker compose up --build -d event-bus custom-node1 custom-node2 custom-node3 relay1 relay2 relay3 gateway
 docker compose run --rm client
-docker compose down -v
+docker compose down
 ```
 
 Run with the external Cloudflare ingress connector:

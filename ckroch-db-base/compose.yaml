@@ -23,6 +23,7 @@ x-cloudflared-external: &cloudflared-external
 
 x-cockroach: &cockroach
   image: cockroachdb/cockroach:latest
+  user: "0:0"
   expose:
     - "26257"
     - "8080"
@@ -31,11 +32,12 @@ services:
   event-bus:
     # Durable operation log replacing native Cockroach inter-node RPC.
     image: nats:2-alpine
+    user: "0:0"
     command: ["-js", "-sd", "/data"]
     expose:
       - "4222"
     volumes:
-      - nats_data:/data
+      - ../_volumes/ckroch-db-base/bus/nats:/data
     networks:
       - bus_net
 
@@ -74,7 +76,7 @@ services:
       - --http-addr=ckroch1:8080
       - --store=/cockroach/cockroach-data
     volumes:
-      - node1_data:/cockroach/cockroach-data
+      - ../_volumes/ckroch-db-base/worker1/cockroach:/cockroach/cockroach-data
     networks:
       - node1_net
 
@@ -87,7 +89,7 @@ services:
       - --http-addr=ckroch2:8080
       - --store=/cockroach/cockroach-data
     volumes:
-      - node2_data:/cockroach/cockroach-data
+      - ../_volumes/ckroch-db-base/worker2/cockroach:/cockroach/cockroach-data
     networks:
       - node2_net
 
@@ -100,7 +102,7 @@ services:
       - --http-addr=ckroch3:8080
       - --store=/cockroach/cockroach-data
     volumes:
-      - node3_data:/cockroach/cockroach-data
+      - ../_volumes/ckroch-db-base/worker3/cockroach:/cockroach/cockroach-data
     networks:
       - node3_net
 
@@ -169,18 +171,27 @@ services:
     networks:
       - ingress_net
 
+  persistence-client:
+    profiles: ["test"]
+    image: python:3.12-slim
+    working_dir: /scripts
+    command: ["python", "/scripts/persistence_check.py"]
+    environment:
+      API_URL: http://gateway:8080
+      LAB_NAME: ckroch-db-base
+    depends_on:
+      - gateway
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - ingress_net
+
 networks:
   ingress_net:
   bus_net:
   node1_net:
   node2_net:
   node3_net:
-
-volumes:
-  nats_data:
-  node1_data:
-  node2_data:
-  node3_data:
 
 secrets:
   cf_token_external:

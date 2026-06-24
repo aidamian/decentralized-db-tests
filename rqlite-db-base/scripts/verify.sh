@@ -21,5 +21,9 @@ grep -q 'CLOUDFLARE_TOKEN_EXTERNAL' "$compose" || fail "missing external tunnel 
 grep -q 'node1_net' "$compose" || fail "missing isolated node1 network"
 grep -q 'node2_net' "$compose" || fail "missing isolated node2 network"
 grep -q 'node3_net' "$compose" || fail "missing isolated node3 network"
+grep -q '../_volumes/rqlite-db-base/worker1' "$compose" || fail "missing per-lab worker1 bind mount"
+grep -q '../_volumes/rqlite-db-base/bus' "$compose" || fail "missing per-lab bus bind mount"
+grep -q 'persistence-client' "$compose" || fail "missing persistence client service"
+[ -f "$project_dir/scripts/persistence_check.py" ] || fail "missing persistence check script"
 
 printf '%s\n' "rqlite-db-base static checks passed"

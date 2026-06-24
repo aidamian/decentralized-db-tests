@@ -22,5 +22,8 @@ done
 grep -q 'cloudflared access tcp' "$compose" || fail "missing Cloudflare TCP peer overlay"
 grep -q -- '--join=ckroch1-peer' "$compose" || fail "tunnel variant should exercise native Cockroach join over tunnel proxies"
 grep -q 'cockroach init' "$compose" || fail "missing Cockroach cluster init service"
+grep -q '../_volumes/ckroch-db-tunnels/worker1' "$compose" || fail "missing per-lab worker1 bind mount"
+grep -q 'persistence-client' "$compose" || fail "missing persistence client service"
+[ -f "$project_dir/scripts/persistence_check.py" ] || fail "missing persistence check script"
 
 printf '%s\n' "ckroch-db-tunnels static checks passed"

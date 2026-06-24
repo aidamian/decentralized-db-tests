@@ -22,5 +22,8 @@ done
 grep -q 'network_mode: "service:custom-node1"' "$compose" || fail "node1 tunnel must share only node1 namespace"
 grep -q 'network_mode: "service:custom-node2"' "$compose" || fail "node2 tunnel must share only node2 namespace"
 grep -q 'network_mode: "service:custom-node3"' "$compose" || fail "node3 tunnel must share only node3 namespace"
+grep -q '../_volumes/custom-db-tunnels/worker1' "$compose" || fail "missing per-lab worker1 bind mount"
+grep -q 'persistence-client' "$compose" || fail "missing persistence client service"
+[ -f "$project_dir/scripts/persistence_check.py" ] || fail "missing persistence check script"
 
 printf '%s\n' "custom-db-tunnels static checks passed"

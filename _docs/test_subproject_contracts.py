@@ -16,6 +16,7 @@ PROJECTS = [
 ]
 BASE_PROJECTS = ["custom-db-base", "rqlite-db-base", "ckroch-db-base"]
 TUNNEL_PROJECTS = ["custom-db-tunnels", "rqlite-db-tunnels", "ckroch-db-tunnels"]
+DOCS_BY_PROJECT = {project: ROOT / "_docs" / f"{project}.md" for project in PROJECTS}
 DB_SERVICES = {
     "custom-db-base": {
         "custom-node1": {"node1_net"},
@@ -48,6 +49,38 @@ DB_SERVICES = {
         "ckroch3": {"node3_net"},
     },
 }
+DB_VOLUME_TARGETS = {
+    "custom-db-base": {
+        "custom-node1": "/data",
+        "custom-node2": "/data",
+        "custom-node3": "/data",
+    },
+    "rqlite-db-base": {
+        "rqlite1": "/rqlite/file/data",
+        "rqlite2": "/rqlite/file/data",
+        "rqlite3": "/rqlite/file/data",
+    },
+    "ckroch-db-base": {
+        "ckroch1": "/cockroach/cockroach-data",
+        "ckroch2": "/cockroach/cockroach-data",
+        "ckroch3": "/cockroach/cockroach-data",
+    },
+    "custom-db-tunnels": {
+        "custom-node1": "/data",
+        "custom-node2": "/data",
+        "custom-node3": "/data",
+    },
+    "rqlite-db-tunnels": {
+        "rqlite1": "/rqlite/file/data",
+        "rqlite2": "/rqlite/file/data",
+        "rqlite3": "/rqlite/file/data",
+    },
+    "ckroch-db-tunnels": {
+        "ckroch1": "/cockroach/cockroach-data",
+        "ckroch2": "/cockroach/cockroach-data",
+        "ckroch3": "/cockroach/cockroach-data",
+    },
+}
 
 
 def compose_config(project: str) -> dict:
@@ -65,7 +98,21 @@ def compose_config(project: str) -> dict:
         }
     )
     output = subprocess.check_output(
-        ["docker", "compose", "-f", str(ROOT / project / "compose.yaml"), "config", "--format", "json"],
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / project / "compose.yaml"),
+            "--profile",
+            "edge",
+            "--profile",
+            "node-direct",
+            "--profile",
+            "test",
+            "config",
+            "--format",
+            "json",
+        ],
         env=env,
         text=True,
     )
@@ -104,6 +151,77 @@ class SubprojectContractTests(unittest.TestCase):
                     actual_networks = set(config["services"][service].get("networks", {}))
                     self.assertEqual(actual_networks, expected_networks)
                     self.assertNotIn("ports", config["services"][service])
+
+    def test_db_nodes_use_per_lab_worker_bind_mounts_under_volumes_root(self):
+        for project, services in DB_VOLUME_TARGETS.items():
+            config = compose_config(project)
+            for worker_index, (service, expected_target) in enumerate(services.items(), start=1):
+                with self.subTest(project=project, service=service):
+                    mounts = config["services"][service].get("volumes", [])
+                    self.assertTrue(mounts, f"{project}:{service} has no persistent mount")
+                    matching = [
+                        mount
+                        for mount in mounts
+                        if mount.get("target") == expected_target
+                        and f"_volumes/{project}/worker{worker_index}" in mount.get("source", "")
+                    ]
+                    self.assertEqual(len(matching), 1, mounts)
+                    self.assertEqual(matching[0].get("type"), "bind")
+
+    def test_base_event_buses_use_per_lab_bind_mounts_under_volumes_root(self):
+        for project in BASE_PROJECTS:
+            config = compose_config(project)
+            mounts = config["services"]["event-bus"].get("volumes", [])
+            matching = [
+                mount
+                for mount in mounts
+                if mount.get("target") == "/data"
+                and f"_volumes/{project}/bus" in mount.get("source", "")
+            ]
+            self.assertEqual(len(matching), 1, mounts)
+            self.assertEqual(matching[0].get("type"), "bind")
+
+    def test_each_project_has_persistence_client_service(self):
+        for project in PROJECTS:
+            config = compose_config(project)
+            self.assertIn("persistence-client", config["services"], project)
+            service = config["services"]["persistence-client"]
+            self.assertIn("test", service.get("profiles", []), project)
+            self.assertIn("ingress_net", service.get("networks", {}), project)
+
+    def test_persistence_scripts_have_retry_and_second_run_mode(self):
+        for project in PROJECTS:
+            script = (ROOT / project / "scripts" / "persistence_check.py").read_text()
+            self.assertIn("REQUEST_RETRIES", script, project)
+            self.assertIn("REQUIRE_PREVIOUS", script, project)
+
+    def test_lab_docs_explain_network_isolation_topology(self):
+        required_phrases = [
+            "## Network Topology And Isolation",
+            "no direct",
+            "docker host",
+            "outside world",
+            "rationale",
+        ]
+        for project, doc in DOCS_BY_PROJECT.items():
+            text = doc.read_text()
+            lowered = text.lower()
+            for phrase in required_phrases:
+                with self.subTest(project=project, phrase=phrase):
+                    if phrase.startswith("##"):
+                        self.assertIn(phrase, text)
+                    else:
+                        self.assertIn(phrase, lowered)
+
+    def test_tunnel_docs_explain_cloudflare_policy_failure_modes(self):
+        for project in TUNNEL_PROJECTS:
+            text = DOCS_BY_PROJECT[project].read_text().lower()
+            with self.subTest(project=project):
+                self.assertIn("1010", text)
+                self.assertIn("waf", text)
+                self.assertIn("access denied", text)
+                if project != "custom-db-tunnels":
+                    self.assertIn("websocket: bad handshake", text)
 
     def test_rqlite_and_cockroach_projects_use_expected_engines(self):
         self.assertIn("rqlite/rqlite", (ROOT / "rqlite-db-base" / "compose.yaml").read_text())

@@ -14,7 +14,7 @@ Run a local brokered e2e:
 ```bash
 docker compose up --build -d event-bus ckroch1 ckroch2 ckroch3 relay1 relay2 relay3 gateway
 docker compose run --rm client
-docker compose down -v
+docker compose down
 ```
 
 Run with Cloudflare client ingress:

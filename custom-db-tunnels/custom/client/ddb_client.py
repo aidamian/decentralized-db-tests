@@ -9,6 +9,7 @@ reachable nodes.
 """
 
 import json
+import hashlib
 import os
 import tempfile
 import urllib.error
@@ -89,10 +90,22 @@ class InMemoryNode:
 
 
 class HttpNode:
-    def __init__(self, base_url: str, timeout: float = 2.0):
+    """HTTP adapter for one Cloudflare-published custom node.
+
+    The adapter keeps the full URL private in operational output. Errors include
+    only the host and status/body preview so failed labs can identify whether
+    Cloudflare returned an Access page, a 502/503 route error, or a node API
+    response without dumping complete tunnel URLs into logs.
+    """
+
+    def __init__(self, base_url: str, timeout: float = 2.0, label: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.node_id = base_url
+        self.node_id = label or _redacted_endpoint(base_url)
+        self.user_agent = os.environ.get(
+            "NODE_HTTP_USER_AGENT",
+            "DecentralizedDbLab/1.0 (+https://developers.cloudflare.com/cloudflare-one/)",
+        )
 
     def health(self) -> dict[str, Any]:
         payload = self._request("GET", "/health")
@@ -121,7 +134,10 @@ class HttpNode:
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = None
-        headers = {"Accept": "application/json"}
+        # Cloudflare WAF/Bot rules often reject the default Python urllib user
+        # agent before traffic reaches the tunnel origin. Use an explicit lab
+        # service identity so policy owners can allowlist it if needed.
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -132,9 +148,12 @@ class HttpNode:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            raise NodeUnavailable(f"{self.base_url} HTTP {exc.code}") from exc
+            preview = exc.read(300).decode("utf-8", errors="replace").replace("\n", " ")
+            raise NodeUnavailable(
+                f"{_redacted_endpoint(self.base_url)} HTTP {exc.code}: {preview}"
+            ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise NodeUnavailable(f"{self.base_url}: {exc}") from exc
+            raise NodeUnavailable(f"{_redacted_endpoint(self.base_url)}: {exc}") from exc
 
 
 class SyncClient:
@@ -149,7 +168,7 @@ class SyncClient:
         if not urls:
             raise ValueError("NODE_URLS must contain at least one node URL")
         timeout = float(os.environ.get("NODE_TIMEOUT_SECONDS", "2"))
-        return cls([HttpNode(url, timeout=timeout) for url in urls])
+        return cls([HttpNode(url, timeout=timeout, label=f"node-url-{index}") for index, url in enumerate(urls, 1)])
 
     def health(self) -> dict[str, Any]:
         reachable = []
@@ -181,7 +200,10 @@ class SyncClient:
             except NodeUnavailable as exc:
                 errors.append(str(exc))
         if len(acks) < min_acks:
-            raise QuorumUnavailable(f"required {min_acks} acknowledgements, got {len(acks)}")
+            detail = "; ".join(errors) if errors else "no node errors were reported"
+            raise QuorumUnavailable(
+                f"required {min_acks} acknowledgements, got {len(acks)}; node errors: {detail}"
+            )
         return {"acks": acks, "errors": errors, "events": [event] if event else []}
 
     def get(self, key: str, min_responses: int = 1, repair: bool = False) -> dict[str, Any]:
@@ -246,3 +268,13 @@ def _normalize_url(url: str) -> str:
     if url.startswith(("http://", "https://")):
         return url
     return f"https://{url}"
+
+
+def _redacted_endpoint(url: str) -> str:
+    """Return a stable non-secret endpoint label for operational diagnostics."""
+
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.netloc:
+        return "<invalid-url>"
+    digest = hashlib.sha256(parsed.netloc.encode("utf-8")).hexdigest()[:10]
+    return f"{parsed.scheme}://host-{digest}"

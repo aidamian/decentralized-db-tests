@@ -9,14 +9,6 @@ name: custom_db_tunnels
 x-cloudflared: &cloudflared
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
-  command:
-    - tunnel
-    - --no-autoupdate
-    - --loglevel
-    - info
-    - run
-    - --token-file
-    - /run/secrets/cf_token
 
 services:
   gateway:
@@ -36,6 +28,16 @@ services:
 
   cloudflared-external:
     <<: *cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - http://127.0.0.1:8080
     profiles: ["edge"]
     network_mode: "service:gateway"
     depends_on:
@@ -58,13 +60,23 @@ services:
     expose:
       - "8080"
     volumes:
-      - node1_data:/data
+      - ../_volumes/custom-db-tunnels/worker1/data:/data
     networks:
       - node1_net
 
   cloudflared-node1:
     # Last-resort direct node tunnel for node1. It is not node-to-node Docker TCP.
     <<: *cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - http://127.0.0.1:8080
     profiles: ["edge", "node-direct"]
     network_mode: "service:custom-node1"
     depends_on:
@@ -86,12 +98,22 @@ services:
     expose:
       - "8080"
     volumes:
-      - node2_data:/data
+      - ../_volumes/custom-db-tunnels/worker2/data:/data
     networks:
       - node2_net
 
   cloudflared-node2:
     <<: *cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - http://127.0.0.1:8080
     profiles: ["edge", "node-direct"]
     network_mode: "service:custom-node2"
     depends_on:
@@ -113,12 +135,22 @@ services:
     expose:
       - "8080"
     volumes:
-      - node3_data:/data
+      - ../_volumes/custom-db-tunnels/worker3/data:/data
     networks:
       - node3_net
 
   cloudflared-node3:
     <<: *cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - http://127.0.0.1:8080
     profiles: ["edge", "node-direct"]
     network_mode: "service:custom-node3"
     depends_on:
@@ -129,16 +161,26 @@ services:
       - source: cf_token_3
         target: cf_token
 
+  persistence-client:
+    profiles: ["test"]
+    image: python:3.12-slim
+    working_dir: /scripts
+    command: ["python", "/scripts/persistence_check.py"]
+    environment:
+      API_URL: http://gateway:8080
+      LAB_NAME: custom-db-tunnels
+    depends_on:
+      - gateway
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - ingress_net
+
 networks:
   ingress_net:
   node1_net:
   node2_net:
   node3_net:
-
-volumes:
-  node1_data:
-  node2_data:
-  node3_data:
 
 secrets:
   cf_token_external:

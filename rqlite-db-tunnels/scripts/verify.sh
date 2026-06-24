@@ -21,5 +21,8 @@ done
 ! grep -q '^  ports:' "$compose" || fail "host port forwarding is forbidden"
 grep -q 'cloudflared access tcp' "$compose" || fail "missing Cloudflare TCP peer overlay"
 grep -q -- '-join' "$compose" || fail "tunnel variant should exercise native rqlite join over tunnel proxies"
+grep -q '../_volumes/rqlite-db-tunnels/worker1' "$compose" || fail "missing per-lab worker1 bind mount"
+grep -q 'persistence-client' "$compose" || fail "missing persistence client service"
+[ -f "$project_dir/scripts/persistence_check.py" ] || fail "missing persistence check script"
 
 printf '%s\n' "rqlite-db-tunnels static checks passed"

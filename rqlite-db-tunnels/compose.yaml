@@ -8,19 +8,14 @@ name: rqlite_db_tunnels
 x-cloudflared-run: &cloudflared-run
   image: cloudflare/cloudflared:latest
   restart: unless-stopped
-  command:
-    - tunnel
-    - --no-autoupdate
-    - --loglevel
-    - info
-    - run
-    - --token-file
-    - /run/secrets/cf_token
 
 x-cloudflared-access: &cloudflared-access
-  image: cloudflare/cloudflared:latest
+  # Wrapper normalizes CLOUDFLARE_URL_N to a bare hostname, then execs:
+  # cloudflared access tcp --hostname <host> --url <LOCAL_ACCESS_LISTEN>
+  build:
+    context: .
+    dockerfile: access/Dockerfile
   restart: unless-stopped
-  entrypoint: ["/bin/sh", "-c"]
 
 x-rqlite: &rqlite
   image: rqlite/rqlite:10.2.1
@@ -46,6 +41,16 @@ services:
 
   cloudflared-external:
     <<: *cloudflared-run
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - http://127.0.0.1:8080
     profiles: ["edge"]
     network_mode: "service:gateway"
     depends_on:
@@ -78,7 +83,7 @@ services:
       - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
       - /rqlite/file/data
     volumes:
-      - node1_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-tunnels/worker1/rqlite:/rqlite/file/data
     networks:
       node1_net:
         aliases:
@@ -86,6 +91,16 @@ services:
 
   cloudflared-node1:
     <<: *cloudflared-run
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - tcp://127.0.0.1:4002
     profiles: ["edge", "node-direct"]
     network_mode: "service:rqlite1"
     depends_on:
@@ -100,9 +115,9 @@ services:
     # Local proxy inside node1_net that dials node2 through Cloudflare Access.
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_2}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node1_net:
         aliases:
@@ -111,9 +126,9 @@ services:
   node1-to-node3:
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_3}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node1_net:
         aliases:
@@ -140,7 +155,7 @@ services:
       - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
       - /rqlite/file/data
     volumes:
-      - node2_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-tunnels/worker2/rqlite:/rqlite/file/data
     networks:
       node2_net:
         aliases:
@@ -148,6 +163,16 @@ services:
 
   cloudflared-node2:
     <<: *cloudflared-run
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - tcp://127.0.0.1:4002
     profiles: ["edge", "node-direct"]
     network_mode: "service:rqlite2"
     depends_on:
@@ -161,9 +186,9 @@ services:
   node2-to-node1:
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_1}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node2_net:
         aliases:
@@ -172,9 +197,9 @@ services:
   node2-to-node3:
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_3" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_3: ${CLOUDFLARE_URL_3}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_3}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node2_net:
         aliases:
@@ -201,7 +226,7 @@ services:
       - rqlite1-peer:4002,rqlite2-peer:4002,rqlite3-peer:4002
       - /rqlite/file/data
     volumes:
-      - node3_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-tunnels/worker3/rqlite:/rqlite/file/data
     networks:
       node3_net:
         aliases:
@@ -209,6 +234,16 @@ services:
 
   cloudflared-node3:
     <<: *cloudflared-run
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - run
+      - --token-file
+      - /run/secrets/cf_token
+      - --url
+      - tcp://127.0.0.1:4002
     profiles: ["edge", "node-direct"]
     network_mode: "service:rqlite3"
     depends_on:
@@ -222,9 +257,9 @@ services:
   node3-to-node1:
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_1" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_1: ${CLOUDFLARE_URL_1}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_1}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node3_net:
         aliases:
@@ -233,24 +268,92 @@ services:
   node3-to-node2:
     <<: *cloudflared-access
     profiles: ["edge", "node-direct"]
-    command: cloudflared access tcp --hostname "$$CLOUDFLARE_URL_2" --url 0.0.0.0:4002
     environment:
-      CLOUDFLARE_URL_2: ${CLOUDFLARE_URL_2}
+      CLOUDFLARE_TARGET_HOSTNAME: ${CLOUDFLARE_URL_2}
+      LOCAL_ACCESS_LISTEN: 0.0.0.0:4002
     networks:
       node3_net:
         aliases:
           - rqlite2-peer
+
+  rqlite-leader-init:
+    # The gateway has an allowed local HTTP path only to rqlite1. After the
+    # native cluster forms, this helper asks rqlite to transfer leadership to
+    # rqlite1 so gateway writes do not need a Docker HTTP path to nodes 2/3.
+    image: python:3.12-slim
+    profiles: ["edge"]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        python - <<'PY'
+        import json
+        import time
+        import urllib.request
+
+        def current_leader() -> str | None:
+            with urllib.request.urlopen("http://rqlite1:4001/leader", timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return payload.get("id")
+
+        def transfer_to_node1() -> None:
+            payload = json.dumps({"id": "rqlite1"}).encode("utf-8")
+            request = urllib.request.Request(
+                "http://rqlite1:4001/leader?wait&timeout=30s",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=35) as response:
+                print(response.read().decode("utf-8", errors="replace"), flush=True)
+
+        last_error = None
+        for attempt in range(1, 61):
+            try:
+                leader = current_leader()
+                if leader == "rqlite1":
+                    print("rqlite1 is leader", flush=True)
+                    raise SystemExit(0)
+                transfer_to_node1()
+                if current_leader() == "rqlite1":
+                    print("rqlite leadership transferred to rqlite1", flush=True)
+                    raise SystemExit(0)
+                raise RuntimeError("leadership transfer returned without rqlite1 becoming leader")
+            except Exception as exc:
+                last_error = exc
+                print(f"waiting to transfer rqlite leadership to rqlite1: {exc}", flush=True)
+                time.sleep(2)
+        raise SystemExit(f"could not transfer rqlite leadership to rqlite1: {last_error}")
+        PY
+    depends_on:
+      - rqlite1
+      - rqlite2
+      - rqlite3
+    networks:
+      - node1_net
+
+  persistence-client:
+    profiles: ["test"]
+    image: python:3.12-slim
+    working_dir: /scripts
+    command: ["python", "/scripts/persistence_check.py"]
+    environment:
+      API_URL: http://gateway:8080
+      LAB_NAME: rqlite-db-tunnels
+    depends_on:
+      gateway:
+        condition: service_started
+      rqlite-leader-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - ingress_net
 
 networks:
   ingress_net:
   node1_net:
   node2_net:
   node3_net:
-
-volumes:
-  node1_data:
-  node2_data:
-  node3_data:
 
 secrets:
   cf_token_external:

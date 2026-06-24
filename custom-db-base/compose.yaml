@@ -26,11 +26,12 @@ services:
   event-bus:
     # Durable operation log used instead of DB-node peer networking.
     image: nats:2-alpine
+    user: "0:0"
     command: ["-js", "-sd", "/data"]
     expose:
       - "4222"
     volumes:
-      - nats_data:/data
+      - ../_volumes/custom-db-base/bus/nats:/data
     networks:
       - bus_net
 
@@ -73,7 +74,7 @@ services:
     expose:
       - "8080"
     volumes:
-      - node1_data:/data
+      - ../_volumes/custom-db-base/worker1/data:/data
     networks:
       - node1_net
 
@@ -88,7 +89,7 @@ services:
     expose:
       - "8080"
     volumes:
-      - node2_data:/data
+      - ../_volumes/custom-db-base/worker2/data:/data
     networks:
       - node2_net
 
@@ -103,7 +104,7 @@ services:
     expose:
       - "8080"
     volumes:
-      - node3_data:/data
+      - ../_volumes/custom-db-base/worker3/data:/data
     networks:
       - node3_net
 
@@ -172,18 +173,27 @@ services:
     networks:
       - ingress_net
 
+  persistence-client:
+    profiles: ["test"]
+    image: python:3.12-slim
+    working_dir: /scripts
+    command: ["python", "/scripts/persistence_check.py"]
+    environment:
+      API_URL: http://gateway:8080
+      LAB_NAME: custom-db-base
+    depends_on:
+      - gateway
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - ingress_net
+
 networks:
   ingress_net:
   bus_net:
   node1_net:
   node2_net:
   node3_net:
-
-volumes:
-  nats_data:
-  node1_data:
-  node2_data:
-  node3_data:
 
 secrets:
   cf_token_external:

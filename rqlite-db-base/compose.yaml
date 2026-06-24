@@ -33,11 +33,12 @@ services:
   event-bus:
     # Durable operation log replacing native rqlite peer replication.
     image: nats:2-alpine
+    user: "0:0"
     command: ["-js", "-sd", "/data"]
     expose:
       - "4222"
     volumes:
-      - nats_data:/data
+      - ../_volumes/rqlite-db-base/bus/nats:/data
     networks:
       - bus_net
 
@@ -84,7 +85,7 @@ services:
       - rqlite1:4002
       - /rqlite/file/data
     volumes:
-      - node1_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-base/worker1/rqlite:/rqlite/file/data
     networks:
       - node1_net
 
@@ -105,7 +106,7 @@ services:
       - rqlite2:4002
       - /rqlite/file/data
     volumes:
-      - node2_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-base/worker2/rqlite:/rqlite/file/data
     networks:
       - node2_net
 
@@ -126,7 +127,7 @@ services:
       - rqlite3:4002
       - /rqlite/file/data
     volumes:
-      - node3_data:/rqlite/file/data
+      - ../_volumes/rqlite-db-base/worker3/rqlite:/rqlite/file/data
     networks:
       - node3_net
 
@@ -195,18 +196,27 @@ services:
     networks:
       - ingress_net
 
+  persistence-client:
+    profiles: ["test"]
+    image: python:3.12-slim
+    working_dir: /scripts
+    command: ["python", "/scripts/persistence_check.py"]
+    environment:
+      API_URL: http://gateway:8080
+      LAB_NAME: rqlite-db-base
+    depends_on:
+      - gateway
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - ingress_net
+
 networks:
   ingress_net:
   bus_net:
   node1_net:
   node2_net:
   node3_net:
-
-volumes:
-  nats_data:
-  node1_data:
-  node2_data:
-  node3_data:
 
 secrets:
   cf_token_external:
